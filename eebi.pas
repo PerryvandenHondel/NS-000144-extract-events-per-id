@@ -215,11 +215,51 @@ end;
 
 
 
+procedure FindFilesRecur(strFolderStart: string);
+var
+	sr: TSearchRec;
+	strPath: string;
+	strFileSpec: string;
+	intValid: integer;
+	strFolderChild: string;
+begin
+	
+	//strPath := ExtractFilePath(strFolderStart); {keep track of the path ie: c:\folder\}
+	strFileSpec := strFolderStart + '\*.*'; {keep track of the name or filter}
+	WriteLn('FindFilesRecur(): ', strFolderStart);
+	
+	intValid := FindFirst(strFileSpec, faAnyFile, sr); { Find first file}
+	//Writeln(intValid);
+	
+	while intValid = 0 do 
+	begin
+		if (sr.Name[1] <> '.') then
+		begin
+			if sr.Attr = faDirectory then
+			begin
+				WriteLn('Dir:    ', sr.Name);
+				strFolderChild := strFolderStart + '\' + sr.Name;
+				//WriteLn('strFolderChild=', strFolderChild);
+				FindFilesRecur(strFolderChild);
+			end
+			else
+				WriteLn('File:   ', strFolderStart + '\' + sr.Name);
+		
+		end;
+		intValid := FindNext(sr);
+	end; // of while.
+end;
+
+
 
 procedure ProgTest();
+
 begin
 	//UpDir('D:\temp\');
 	//RecurDir('D:\Temp\');
+	FindFilesRecur('D:\Temp');
+	
+	
 end;
 
 
@@ -294,8 +334,8 @@ end;
 begin
 	gintLineCount := 0;
 
-	//ProgTest();
-	ProgRun();
+	ProgTest();
+	//ProgRun();
 	
 	WriteLn('Found ', gintLineCount, ' events with id ', gstrEventId);
 end. 
