@@ -1,4 +1,12 @@
-program convlpr;
+{
+	
+	Extract Events by ID from LPR export files.
+
+}
+
+
+
+program ExtracEventsById;
 
 
 
