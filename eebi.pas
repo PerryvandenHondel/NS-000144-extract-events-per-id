@@ -1,7 +1,11 @@
 {
 	
-	Extract Events by ID from LPR export files.
+	Extract Events by ID from LPR export files. (EEBI)
 
+							
+	R:\GitRepos\NS-000144-extract-events-by-id\NS00DC012\08db66346664a0b5.lpr					
+
+	
 }
 
 
@@ -26,6 +30,18 @@ uses
 	USupportLibrary;
 
 
+
+type
+	// Type definition of the Event Records
+	REventFile = record
+		EventId: integer;
+		FilePointer: TextFile;
+		count: integer;
+		Path: string;
+	end;
+	AEventFile = array of REventFile;
+	
+	
 	
 const
 	TAB = 				#9;
@@ -33,10 +49,13 @@ const
 
 
 var
-	gintLineCount: integer;
-	gtfTsv: TextFile;
-	gstrEventId: string;
-	
+	//gintLineCount: integer;
+	//gtfTsv: TextFile;
+	//gstrEventId: string;
+	arrEventFile: AEventFile;
+
+
+
 procedure WriteHeader(strFnameEvent: string);
 var
 	f: TextFile;
@@ -84,42 +103,44 @@ begin
 		end;
 	end;
 end;
+
+
 	
-	
-  procedure SafeCopy(fromFile, toFile : string);
-  type bufferType = array [1..65535] of char;
-  type bufferTypePtr = ^bufferType;  { Use the heap }
-  var bufferPtr : bufferTypePtr;     { for the buffer }
-      f1, f2 : file;
-      bufferSize, readCount, writeCount : word;
-      fmSave : byte;              { To store the filemode }
-  begin
-    bufferSize := SizeOf(bufferType);
-    //if MaxAvail < bufferSize then exit;  { Assure there is enough memory }
-    New (bufferPtr);              { Create the buffer }
-    fmSave := FileMode;           { Store the filemode }
-    FileMode := 0;                { To read also read-only files }
-    Assign (f1, fromFile);
-    {$I-} Reset (f1, 1); {$I+}    { Note the record size 1, important! }
-    if IOResult <> 0 then exit;   { Does the file exist? }
-    Assign (f2, toFile);
-    {$I-} Reset (f2, 1); {$I+}    { Don't copy on an existing file }
-    if IOResult = 0 then begin close (f2); exit; end;
-    {$I-} Rewrite (f2, 1); {$I+}  { Open the target }
-    if IOResult <> 0 then exit;
-    repeat                        { Do the copying }
-      BlockRead (f1, bufferPtr^, bufferSize, readCount);
-      {$I-} BlockWrite (f2, bufferPtr^, readCount, writeCount); {$I+}
-      if IOResult <> 0 then begin close (f1); exit; end;
-    until (readCount = 0) or (writeCount <> readCount);
-    writeln ('Copied ', fromFile, ' to ', toFile,
-             ' ', FileSize(f2), ' bytes');
-    close (f1); close (f2);
-    FileMode := fmSave;           { Restore the original filemode }
-    Dispose (bufferPtr);          { Release the buffer from the heap }
- end;  (* safecopy *)
-	
-	
+procedure SafeCopy(fromFile, toFile : string);
+type 
+	bufferType = array [1..65535] of char;
+	bufferTypePtr = ^bufferType;  { Use the heap }
+var 
+	bufferPtr : bufferTypePtr;     { for the buffer }
+	f1, f2 : file;
+	bufferSize, readCount, writeCount : word;
+	fmSave : byte;              { To store the filemode }
+begin
+	bufferSize := SizeOf(bufferType);
+	//if MaxAvail < bufferSize then exit;  { Assure there is enough memory }
+	New (bufferPtr);              { Create the buffer }
+	fmSave := FileMode;           { Store the filemode }
+	FileMode := 0;                { To read also read-only files }
+	Assign (f1, fromFile);
+	{$I-} Reset (f1, 1); {$I+}    { Note the record size 1, important! }
+	if IOResult <> 0 then exit;   { Does the file exist? }
+	Assign (f2, toFile);
+	{$I-} Reset (f2, 1); {$I+}    { Don't copy on an existing file }
+	if IOResult = 0 then begin close (f2); exit; end;
+	{$I-} Rewrite (f2, 1); {$I+}  { Open the target }
+	if IOResult <> 0 then exit;
+	repeat                        { Do the copying }
+		BlockRead (f1, bufferPtr^, bufferSize, readCount);
+		{$I-} BlockWrite (f2, bufferPtr^, readCount, writeCount); {$I+}
+		if IOResult <> 0 then begin close (f1); exit; end;
+		until (readCount = 0) or (writeCount <> readCount);
+		writeln ('Copied ', fromFile, ' to ', toFile,' ', FileSize(f2), ' bytes');
+	close (f1); close (f2);
+	FileMode := fmSave;           { Restore the original filemode }
+	Dispose (bufferPtr);          { Release the buffer from the heap }
+end;  (* safecopy *)
+
+
 
 function FixLine(strLine: AnsiString): AnsiString;
 {
@@ -160,9 +181,9 @@ begin
 	FixLine := strLine;
 end;
 	
+
 	
-	
-procedure WriteEventLine(strDcName: string; strLine: AnsiString);
+procedure WriteEventLine(intPosEvent: integer; strDcName: string; strLine: AnsiString);
 var
 	strBuffer: AnsiString;
 begin
@@ -173,55 +194,157 @@ begin
 	strBuffer := strDcName + #9 + strBuffer;
 	
 	//Writeln('WriteEventLine(): ', strBuffer);
-	WriteLn(gtfTsv, strBuffer);
-	Inc(gintLineCount);
+	WriteLn(arrEventFile[intPosEvent].FilePointer, strBuffer);
+	//Inc(gintLineCount);
+	Inc(arrEventFile[intPosEvent].count);
 	//Write('--Line: ', gintLineCount);
 end;
 
 
 
-procedure ProcessLprFile(strDcName: string; strPathLpr: string; strPathEvents: string; strEventId: string);
+function IsEventFound(intEventId: integer): integer;
 var
-	f: TextFile;
-	strLine: AnsiString;
-	arrLine: TStringArray;
+	i: integer;
+	m: integer;
+	r: integer;
 begin
-	WriteLn('ProcessLprFile():'); 
-	WriteLn('Extracting only events with id ', strEventId); 
-	WriteLn('                          from ', strPathLpr);
-	WriteLn('                     of system ', strDcName);
-	WriteLn('                     into file ', strPathEvents);
+	r := -1;
 	
+	// Get the number of items in the array.
+	m := Length(arrEventFile);
+	//WriteLn('IsEventFound(): m=', m);
+	if m = 0 then
+	begin
+		// array does not contain items.
+		//WriteLn('The array is empty!');
+		r := -1;
+	end
+	else
+	begin
+		for i := 0 to m do
+		begin
+			//WriteLn('IsEventFound():', i, #9, arrEventFile[i].EventId, #9, arrEventFile[i].Path);
+			if arrEventFile[i].EventId = intEventId then
+			begin
+				//WriteLn('FOUND IT ON POS ', i);
+				r := i;
+			end;
+		end;
+	end;
+	IsEventFound := r;
+end;
+
+
+
+procedure AddEventFile(intEventId: integer);
+var
+	i: integer;
+	strPath: string;
+begin
+	if IsEventFound(intEventId) = -1 then
+	begin
+		//WriteLn('Add new record for event: ', intEventId);
+		
+		//WriteLn('LENGTH arrEventFile=', Length(arrEventFile)); // Init: 0
+		//WriteLn('  HIGH arrEventFile=', High(arrEventFile));   // Init: -1
+		
+		i := Length(arrEventFile);
+		SetLength(arrEventFile, i + 1);
+		arrEventFile[i].EventId := intEventId;
+		arrEventFile[i].count := 0;
+		strPath := GetProgramFolder() + '\events-' + IntToStr(intEventId) + '.tsv';
+		arrEventFile[i].Path := strPath;
+		
+		AssignFile(arrEventFile[i].FilePointer, strPath);
+		{I+}	
+		try 
+			ReWrite(arrEventFile[i].FilePointer);
+			
+		except
+			on E: EInOutError do
+				WriteLn('ProcessLprFile(): file ', strPath, ' handling error occurred, Details: ', E.ClassName, '/', E.Message);
+		end;
+	end;
+end;
+
+
+
+
+procedure ProcessLprFile(strPathLpr: string);
+var
+	arrPath: TStringArray;
+	arrLine: TStringArray;
+	strLine: AnsiString;
+	strDcName: string;
+	strEventId: string;
+	intEventId: integer;
+	//strPathTsv: string;
+	intLineCount: integer;
+	f: TextFile;
+	intEventPos: integer;
+begin
+	WriteLn('ProcessLprFile():');
+	WriteLn('  strPathLpr: ', strPathLpr);
+	
+	SetLength(arrPath, 0);
+	arrPath := SplitString(strPathLpr, '\');
+	strDcName := arrPath[Length(arrPath) - 2];
+	WriteLn('   strDcName: ', strDcName);
+	
+	
+	//strEventId := '4625';
+	
+	//strPathTsv := GetProgramFolder() + '\events-' + strEventId + '.tsv';
+	//WriteLn('  strPathTsv: ', strPathTsv);
+	
+	//AssignFile(gtfTsv, strPathTsv);
+	//ReWrite(gtfTsv); // Open file to write, create when needed.
+		
+	intLineCount := 0;
 	AssignFile(f, strPathLpr);
 	{I+}
 	try 
 		Reset(f);
 		repeat
+			Inc(intLineCount);
 			ReadLn(f, strLine);
 			//WriteLn(strLine);
-			
-			SetLength(arrLine, 0);
-			arrLine := SplitString(strLine, '|');
-			if arrLine[1] = strEventId then
-				// Only export the events with id strEventId.
-				WriteEventLine(strDcName, strLine);
+			if intLineCount <> 1 then
+			begin
+				// Skip the header line!
+				SetLength(arrLine, 0);
+				arrLine := SplitString(strLine, '|');
+				// Get the event id for the line.
+				strEventId := arrLine[1];
+				intEventId := StrToInt(strEventId);
+				if intEventId <> 4932 then
+				begin
+					AddEventFile(intEventId); // Add the event to the event array when it does not exist yet.
+					intEventPos := IsEventFound(intEventId);
+					//WriteLn('--' + strPathLpr);
+					WriteEventLine(intEventPos, strDcName, strLine);
+				end;
+			end;
 		until Eof(f);
 		CloseFile(f);
 	except
 		on E: EInOutError do
 			WriteLn('ProcessLprFile(): file ', strPathLpr, ' handling error occurred, Details: ', E.ClassName, '/', E.Message);
-	end;
-end;
+	end;	//ProcessLprFile(strDcName, strPathLpr, strPathTsv, gstrEventId);
+		
+	//CloseFile(gtfTsv);
+end; // 
 
 
 
 procedure FindFilesRecur(strFolderStart: string);
 var
 	sr: TSearchRec;
-	strPath: string;
+	//strPath: string;
 	strFileSpec: string;
 	intValid: integer;
 	strFolderChild: string;
+	strPathFoundFile: string;
 begin
 	
 	//strPath := ExtractFilePath(strFolderStart); {keep track of the path ie: c:\folder\}
@@ -243,8 +366,11 @@ begin
 				FindFilesRecur(strFolderChild);
 			end
 			else
-				WriteLn('File:   ', strFolderStart + '\' + sr.Name);
-		
+			begin
+				strPathFoundFile := strFolderStart + '\' + sr.Name;
+				//WriteLn('strPathFoundFile:   ', strPathFoundFile);
+				ProcessLprFile(strPathFoundFile);
+			end;
 		end;
 		intValid := FindNext(sr);
 	end; // of while.
@@ -252,90 +378,144 @@ end;
 
 
 
-procedure ProgTest();
-
+procedure ShowEventFile(strWhen: string);
+var	
+	i: integer;
+	m: integer;
 begin
-	//UpDir('D:\temp\');
-	//RecurDir('D:\Temp\');
-	FindFilesRecur('D:\Temp');
+	WriteLn('-----------------------------------');
+	WriteLn('EVENTFILERECORDS: ', strWhen);
 	
+	m := High(arrEventFile);
+	//WriteLn('items in array: ', m + 1);
 	
-end;
-
-
-procedure ProgRun();
-var
-	strPathLpr: string;
-	arrPath: TStringArray;
-	strDcName: string;
-	
-	strPathTsv: string;
-	//strPathHdr: string;
-begin
-	//gblnWriteHeader := false;
-	if (ParamCount <> 2) then
-	begin
-		WriteLn('ERROR: Not the correct number of parameters supplied!');
-		WriteLn('Example: CONVERT.EXE <pathtolpr> <eventid>');
-		Halt(0);
-	end
+	if m < 0 then
+		WriteLn('No items in array arrEventFile!')
 	else
 	begin
-		strPathLpr := ParamStr(1);
-		gstrEventId := ParamStr(2);
-		gintLineCount := 0;
-		
-		SetLength(arrPath, 0);
-		arrPath := SplitString(strPathLpr, '\');
-		strDcName := arrPath[Length(arrPath) - 2];
-		//WriteLn(strPathLpr);
-		//WriteLn(strDcName);
-		//WriteLn(strEventId);
-		
-		
-		strPathTsv := GetProgramFolder() + '\events-' + gstrEventId + '.tsv';
-		//strPathHdr := GetProgramFolder() + '\header-' + gstrEventId + '.tsv';
-		
-		//WriteLn(strPathTsv);
-		//WriteLn(strPathHdr);
-		{
-		if gblnWriteHeader = true then 
+		for i := 0 to m do
 		begin
-		
-			if not FileExists(strPathHdr) then
-			begin
-				WriteLn('ERROR: Header file for event id ', strEventId, ' not found!');
-				Exit;
-			end;
-		
-			if not FileExists(strPathTsv) then
-			begin
-				// The file does not exists. copy the header to the tsv
-				SafeCopy(strPathHdr , strPathTsv); // Copies the header file (.HDR) to the Tab Separated Values (.TSV) file.
-			end;
+			WriteLn(i, ':', #9, arrEventFile[i].EventId, #9, arrEventFile[i].Path, #9, arrEventFile[i].count);
 		end;
-		}
-		
-		AssignFile(gtfTsv, strPathTsv);
-		{I+}
-		if FileExists(strPathTsv) = true then
-			Append(gtfTsv) // File already exists, open for appending new text.
-		else
-			ReWrite(gtfTsv); // Open file to write, create when needed.
-		
-		ProcessLprFile(strDcName, strPathLpr, strPathTsv, gstrEventId);
-		
-		CloseFile(gtfTsv);
 	end;
 end;
 
+
+
+procedure CloseAllFiles();
+var
+	i: integer;
+begin
+	for i := 0 to High(arrEventFile) do
+	begin
+		WriteLn('Closing file: ', arrEventFile[i].Path);
+		CloseFile(arrEventFile[i].FilePointer);
+	end;
+end;
+
+
+procedure ProgUsage();
+begin
+	WriteLn('Usage:');
+	WriteLn('  ' + ParamStr(0) + ' <-option> <file/directory>');
+	WriteLn;
+	WriteLn('  --file <path>         Convert a single file.');
+	WriteLn('  --dir <directory>     Convert all files in a directory.');
+	WriteLn;
+end;
+
+
+
+procedure ProgInit();
+begin
+end;
+
+
+
+procedure ProgRun();
+begin
+	if ParamCount <> 2 then
+		ProgUsage()
+	else
+	begin
+		case LowerCase(ParamStr(1)) of
+				'--file', '-f':
+					begin
+						WriteLn('Convert a single file.');
+						ProcessLprFile(ParamStr(2));
+					end;
+				'--dir', '-d':
+					begin
+						WriteLn('Convert all files in a directory.');
+						FindFilesRecur(ParamStr(2));
+					end;
+				'--help', '-h', '-?':
+					begin
+						ProgUsage();
+					end;
+			end; // of case
+	end;
+
+	//FindFilesRecur('D:\Temp\TESTEEBI');
+	//CloseAllFiles();
+end;
+
+
+
+procedure ProgTest();
+begin
+	//UpDir('D:\temp\');
+	//RecurDir('D:\Temp\');
+	//
+	//ProcessLprFile('R:\GitRepos\NS-000144-extract-events-by-id\ebc9619f390ca2f4.lpr');
+	
+	WriteLn(FixLine('2015-07-05 14:54:17|4932|8|CN=NTDS Settings,CN=NS00DC012,CN=Servers,CN=Lelystad-01,CN=Sites,CN=Configuration,DC=fr,DC=ns,DC=nl|CN=NTDS Settings,CN=NS00DC055,CN=Servers,CN=Lelystad-01,CN=Sites,CN=Configuration,DC=fr,DC=ns,DC=nl|CN=Configuration,DC=fr,DC=ns,DC=nl|85|2070012|12111826'));
+
+	
+//	ShowEventFile('After!');
+{	
+	//WriteLn(DoesEventIdExists('4655'));
+	//AddEventFile('4625');
+	//AddEventFile('4625');
+	//AddEventFile('4625');
+	//ShowEventFile('Before!');
+	//AddEventFile(4625);
+	AddEventFile(4720);
+	AddEventFile(5000);
+	AddEventFile(5000);
+	AddEventFile(5010);
+	AddEventFile(5000);
+	AddEventFile(4720);
+	AddEventFile(4722);
+	AddEventFile(4723);
+	AddEventFile(4724);
+	AddEventFile(4725);
+	AddEventFile(4726);
+	
+	
+	//WriteLn(IsEventFound('4625'));
+	//AddEventFile('4625');
+	//WriteLn(DoesEventIdExists('4625'));
+	
+	CloseAllFiles();
+}	
+end;
+
+
+procedure ProgDone();
+begin
+end;
+
+
 	
 	
 begin
-	gintLineCount := 0;
+	//gintLineCount := 0;
 
-	ProgTest();
-	//ProgRun();
+	ProgInit();
+	//ProgTest();
+	ProgRun();
+	ProgDone();
 	
-	WriteLn('Found ', gintLineCount, ' events with id ', gstrEventId);
+	//WriteLn('Found ', gintLineCount, ' events with id ', strEventId);
 end. 
