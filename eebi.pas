@@ -42,7 +42,6 @@ type
 	AEventFile = array of REventFile;
 	
 	
-	
 const
 	TAB = 				#9;
 
@@ -53,6 +52,7 @@ var
 	//gtfTsv: TextFile;
 	//gstrEventId: string;
 	arrEventFile: AEventFile;
+	gblnAppend: boolean;
 
 
 
@@ -243,7 +243,7 @@ var
 begin
 	if IsEventFound(intEventId) = -1 then
 	begin
-		//WriteLn('Add new record for event: ', intEventId);
+		WriteLn('Found a new event id: ', intEventId);
 		
 		//WriteLn('LENGTH arrEventFile=', Length(arrEventFile)); // Init: 0
 		//WriteLn('  HIGH arrEventFile=', High(arrEventFile));   // Init: -1
@@ -258,7 +258,17 @@ begin
 		AssignFile(arrEventFile[i].FilePointer, strPath);
 		{I+}	
 		try 
-			ReWrite(arrEventFile[i].FilePointer);
+			if FileExists(strPath) = true then
+			begin
+				// Append to existing file.
+				Append(arrEventFile[i].FilePointer);
+			end
+			else
+			begin
+				// Create a new file.
+				WriteLn('New output file ', strPath, ' is created');
+				ReWrite(arrEventFile[i].FilePointer);
+			end;
 			
 		except
 			on E: EInOutError do
@@ -276,7 +286,7 @@ var
 	arrLine: TStringArray;
 	strLine: AnsiString;
 	strDcName: string;
-	strEventId: string;
+	//strEventId: string;
 	intEventId: integer;
 	//strPathTsv: string;
 	intLineCount: integer;
@@ -315,15 +325,16 @@ begin
 				SetLength(arrLine, 0);
 				arrLine := SplitString(strLine, '|');
 				// Get the event id for the line.
-				strEventId := arrLine[1];
-				intEventId := StrToInt(strEventId);
-				if intEventId <> 4932 then
-				begin
+				//strEventId := arrLine[1];
+				intEventId := StrToInt(arrLine[1]);
+				//if intEventId = 4625 then
+				//begin
 					AddEventFile(intEventId); // Add the event to the event array when it does not exist yet.
 					intEventPos := IsEventFound(intEventId);
 					//WriteLn('--' + strPathLpr);
 					WriteEventLine(intEventPos, strDcName, strLine);
-				end;
+				//end;
+				SetLength(arrLine, 0);
 			end;
 		until Eof(f);
 		CloseFile(f);
@@ -421,6 +432,7 @@ begin
 	WriteLn;
 	WriteLn('  --file <path>         Convert a single file.');
 	WriteLn('  --dir <directory>     Convert all files in a directory.');
+	WriteLn('  --append              Append to existing output files.');
 	WriteLn;
 end;
 
@@ -428,36 +440,17 @@ end;
 
 procedure ProgInit();
 begin
+	gblnAppend := false;
 end;
 
 
 
 procedure ProgRun();
 begin
-	if ParamCount <> 2 then
+	if ParamCount <> 1 then
 		ProgUsage()
 	else
-	begin
-		case LowerCase(ParamStr(1)) of
-				'--file', '-f':
-					begin
-						WriteLn('Convert a single file.');
-						ProcessLprFile(ParamStr(2));
-					end;
-				'--dir', '-d':
-					begin
-						WriteLn('Convert all files in a directory.');
-						FindFilesRecur(ParamStr(2));
-					end;
-				'--help', '-h', '-?':
-					begin
-						ProgUsage();
-					end;
-			end; // of case
-	end;
-
-	//FindFilesRecur('D:\Temp\TESTEEBI');
-	//CloseAllFiles();
+		ProcessLprFile(ParamStr(1));
 end;
 
 
