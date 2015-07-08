@@ -34,10 +34,11 @@ uses
 type
 	// Type definition of the Event Records
 	REventFile = record
-		EventId: integer;
-		FilePointer: TextFile;
-		count: integer;
-		Path: string;
+		EventId: integer;			// What's the current
+		FilePointer: TextFile;		// File pointer to the file.
+		Header: AnsiString;			// Store the header line in this.
+		count: integer;				// Count the number of records
+		Path: string;				// Path to the export file. D:\folder\events-XXXX.tsv.
 	end;
 	AEventFile = array of REventFile;
 	
@@ -52,7 +53,7 @@ var
 	//gtfTsv: TextFile;
 	//gstrEventId: string;
 	arrEventFile: AEventFile;
-	gblnAppend: boolean;
+	//gblnAppend: boolean;
 
 
 
@@ -182,8 +183,8 @@ begin
 end;
 	
 
-	
-procedure WriteEventLine(intPosEvent: integer; strDcName: string; strLine: AnsiString);
+//WriteEventLine(intEventPos, strFileLpr, intLineCount, strDcName, strLine);
+procedure WriteEventLine(intPosEvent: integer; strFileLpr: string; intLineNumber: integer; strDcName: string; strLine: AnsiString);
 var
 	strBuffer: AnsiString;
 begin
@@ -191,7 +192,9 @@ begin
 	strBuffer := FixLine(strLine);
 	
 	// Add the prefix the DC name.
-	strBuffer := strDcName + #9 + strBuffer;
+	//strBuffer := strDcName + #9 + strBuffer;
+	// Build a new buffer with source file, line number, DC name and the original buffer.
+	strBuffer := strFileLpr + #9 + IntToStr(intLineNumber) + #9 + strDcName + #9 + strBuffer;
 	
 	//Writeln('WriteEventLine(): ', strBuffer);
 	WriteLn(arrEventFile[intPosEvent].FilePointer, strBuffer);
@@ -236,6 +239,29 @@ end;
 
 
 
+procedure AddEventHeader(intEventId: integer; strHeader: AnsiString);
+var
+	intFound: integer;
+	arrHeader: TStringArray;
+	i: integer;
+begin
+	intFound := IsEventFound(intEventId);
+	WriteLn('AddEventHeader(): ', intEventId, '-', strHeader);
+	
+	SetLength(arrHeader, 0);
+	arrHeader := SplitString(strHeader, #9);
+	WriteLn('AddEventHeader(): number of columns=', Length(arrHeader));
+	for i := 0 to High(arrHeader) do
+	begin
+		WriteLn(intEventId, ': ', i, ' = ', arrHeader[i]);
+	end;
+	
+	arrEventFile[intFound].Header := strHeader;
+	
+end;
+
+
+
 procedure AddEventFile(intEventId: integer);
 var
 	i: integer;
@@ -255,6 +281,12 @@ begin
 		strPath := GetProgramFolder() + '\events-' + IntToStr(intEventId) + '.tsv';
 		arrEventFile[i].Path := strPath;
 		
+		if intEventId = 4625 then
+			AddEventHeader(4625, 'LprFile	LineNumber	DC	DateTime	EventId	EventStatus	Unknown1	Unknown2	Unknown3	Unknown4	SecurityId	SamAccountName	Domain	LogonFailureCode	Unknown5	SubLogonFailureCode	LogonType	LogonProcess	Protocol	WorkstationName	Unknown6	Unknown7	Unknown8	Unknown9	Unknown10	Unknown11	IpAddress	SourcePort');
+		
+		if intEventId = 4770 then
+			AddEventHeader(4770, 'LprFile	LineNumber	DC	DateTime	EventId	EventStatus	AccountName	AccountDomain	ServiceName	ServiceId	TicketOptions	TicketEncryptionType	ClientAddress	ClientPort');
+		
 		AssignFile(arrEventFile[i].FilePointer, strPath);
 		{I+}	
 		try 
@@ -268,8 +300,15 @@ begin
 				// Create a new file.
 				WriteLn('New output file ', strPath, ' is created');
 				ReWrite(arrEventFile[i].FilePointer);
+				// Write the header, only when there is a header line in the Event record.
+				//WriteLn('len header=', Length(arrEventFile[i].Header));
+				if Length(arrEventFile[i].Header) > 0 then
+				begin
+					// When there is a header found, write it to the file.
+					WriteLn('Write a header line to event file: ', strPath);
+					WriteLn(arrEventFile[i].FilePointer, arrEventFile[i].Header);
+				end;
 			end;
-			
 		except
 			on E: EInOutError do
 				WriteLn('ProcessLprFile(): file ', strPath, ' handling error occurred, Details: ', E.ClassName, '/', E.Message);
@@ -292,6 +331,7 @@ var
 	intLineCount: integer;
 	f: TextFile;
 	intEventPos: integer;
+	strFileLpr: string;
 begin
 	WriteLn('ProcessLprFile():');
 	WriteLn('  strPathLpr: ', strPathLpr);
@@ -300,6 +340,9 @@ begin
 	arrPath := SplitString(strPathLpr, '\');
 	strDcName := arrPath[Length(arrPath) - 2];
 	WriteLn('   strDcName: ', strDcName);
+	
+	strFileLpr := ExtractFileName(strPathLpr);
+	strFileLpr := StringReplace(strFileLpr, '.lpr', '', [rfReplaceAll, rfIgnoreCase]);
 	
 	
 	//strEventId := '4625';
@@ -330,9 +373,11 @@ begin
 				//if intEventId = 4625 then
 				//begin
 					AddEventFile(intEventId); // Add the event to the event array when it does not exist yet.
+					//WriteLn(strFileLpr, #9, intLineCount);
+					
 					intEventPos := IsEventFound(intEventId);
 					//WriteLn('--' + strPathLpr);
-					WriteEventLine(intEventPos, strDcName, strLine);
+					WriteEventLine(intEventPos, strFileLpr, intLineCount, strDcName, strLine);
 				//end;
 				SetLength(arrLine, 0);
 			end;
@@ -428,19 +473,20 @@ end;
 procedure ProgUsage();
 begin
 	WriteLn('Usage:');
-	WriteLn('  ' + ParamStr(0) + ' <-option> <file/directory>');
+	WriteLn('  ' + ParamStr(0) + ' <full path to file>');
 	WriteLn;
+	{WriteLn;
 	WriteLn('  --file <path>         Convert a single file.');
 	WriteLn('  --dir <directory>     Convert all files in a directory.');
 	WriteLn('  --append              Append to existing output files.');
-	WriteLn;
+	WriteLn;}
 end;
 
 
 
 procedure ProgInit();
 begin
-	gblnAppend := false;
+	//gblnAppend := false;
 end;
 
 
