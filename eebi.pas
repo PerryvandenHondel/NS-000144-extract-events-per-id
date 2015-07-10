@@ -37,14 +37,17 @@ type
 		EventId: integer;			// What's the current
 		FilePointer: TextFile;		// File pointer to the file.
 		Header: AnsiString;			// Store the header line in this.
+		HeaderCount: integer;		// Number of items in the header;
 		count: integer;				// Count the number of records
 		Path: string;				// Path to the export file. D:\folder\events-XXXX.tsv.
 	end;
 	AEventFile = array of REventFile;
-	
-	
+
+
+
 const
 	TAB = 				#9;
+	SEP = 				'|';
 
 
 
@@ -57,56 +60,6 @@ var
 
 
 
-procedure WriteHeader(strFnameEvent: string);
-var
-	f: TextFile;
-	h: AnsiString;
-begin
-	
-	if not FileExists(strFnameEvent) then
-	begin
-		AssignFile(f, strFnameEvent);
-		{I+}
-		try 
-			ReWrite(f);
-			h := 'DcServer';
-			h := h + TAB + 'DateTime';
-			h := h + TAB + 'EventId';
-			h := h + TAB + 'EventStatus';
-			h := h + TAB + 'Unknown1';
-			h := h + TAB + 'Unknown2';
-			h := h + TAB + 'Unknown3';
-			h := h + TAB + 'Unknown4';
-			h := h + TAB + 'SecurityId';
-			h := h + TAB + 'SamAccountName';
-			h := h + TAB + 'Domain';
-			h := h + TAB + 'LogonFailureCode';
-			h := h + TAB + 'Unknown5';
-			h := h + TAB + 'SubLogonFailureCode';
-			h := h + TAB + 'LogonType';
-			h := h + TAB + 'LogonProcess';
-			h := h + TAB + 'Protocol';
-			h := h + TAB + 'WorkstationName';
-			h := h + TAB + 'Unknown6';
-			h := h + TAB + 'Unknown7';
-			h := h + TAB + 'Unknown8';
-			h := h + TAB + 'Unknown9';
-			h := h + TAB + 'Unknown10';
-			h := h + TAB + 'SourceNetworkAddress';
-			h := h + TAB + 'SourcePort';
-		
-			WriteLn(f, h);
-			
-			CloseFile(f);
-		except
-			on E: EInOutError do
-				WriteLn('File ', strFnameEvent, ' handeling error occurred, Details: ', E.ClassName, '/', E.Message);
-		end;
-	end;
-end;
-
-
-	
 procedure SafeCopy(fromFile, toFile : string);
 type 
 	bufferType = array [1..65535] of char;
@@ -175,18 +128,31 @@ begin
 	until blnFixed = true;
 	
 	// Finally replace all the pipe symbol for a tab.
-	strLine := StringReplace(strLine, '|', TAB, [rfReplaceAll]);
+	// NO NEED TO CHANGE THE PIPE TO A TAB, Pipe Separated Values.
+	//strLine := StringReplace(strLine, '|', TAB, [rfReplaceAll]);
 	
 	//WriteLn('FixLine returns:');
 	//Writeln(strLine);
 	FixLine := strLine;
 end;
 	
+	
+function OccurrencesOfChar(const S: string; const C: char): integer;
+var
+	i: Integer;
+begin
+	result := 0;
+	for i := 1 to Length(S) do
+		if S[i] = C then
+			inc(result);
+end;
 
 //WriteEventLine(intEventPos, strFileLpr, intLineCount, strDcName, strLine);
 procedure WriteEventLine(intPosEvent: integer; strFileLpr: string; intLineNumber: integer; strDcName: string; strLine: AnsiString);
 var
 	strBuffer: AnsiString;
+	intHeaderCount: integer;
+	intFoundColumns: integer;
 begin
 	// Replace all pipes for a tab.
 	strBuffer := FixLine(strLine);
@@ -194,13 +160,25 @@ begin
 	// Add the prefix the DC name.
 	//strBuffer := strDcName + #9 + strBuffer;
 	// Build a new buffer with source file, line number, DC name and the original buffer.
-	strBuffer := strFileLpr + #9 + IntToStr(intLineNumber) + #9 + strDcName + #9 + strBuffer;
+	strBuffer := strFileLpr + SEP + IntToStr(intLineNumber) + SEP + strDcName + SEP + strBuffer;
 	
 	//Writeln('WriteEventLine(): ', strBuffer);
-	WriteLn(arrEventFile[intPosEvent].FilePointer, strBuffer);
-	//Inc(gintLineCount);
-	Inc(arrEventFile[intPosEvent].count);
-	//Write('--Line: ', gintLineCount);
+	// Get the number of columns from the header record.
+	intHeaderCount := arrEventFile[intPosEvent].HeaderCount;
+	
+	// Determine the number of columns in the line buffer. Add one of columns
+	// Finding 4 separators means 5 colums with information: c1|c2|c3|c4|c5
+	intFoundColumns := OccurrencesOfChar(strBuffer, SEP) + 1; 
+	
+	if intHeaderCount = intFoundColumns then
+	begin
+		WriteLn(arrEventFile[intPosEvent].FilePointer, strBuffer);
+		//Inc(gintLineCount);
+		Inc(arrEventFile[intPosEvent].count);
+		//Write('--Line: ', gintLineCount);
+	end;
+	{else
+		WriteLn('*** BAD LINE DETECTED: ', strBuffer);}
 end;
 
 
@@ -257,7 +235,59 @@ begin
 	end;
 	
 	arrEventFile[intFound].Header := strHeader;
+end;
+
+
+procedure AddEventHeaderFromFile(intEventId: integer);
+var
+	f: TextFile;
+	strFileName: string;
+	strLine: string;
+	arrLine: TStringArray;
+	i: integer;
+	strHeader: AnsiString;
+	intFound: integer;
+begin
+	WriteLn('AddEventHeaderFromFile(): ', intEventId);
+	strFileName := 'eebi-header.conf';
+	i := 0;
+	strHeader := '';
 	
+	AssignFile(f, strFileName);
+	{I+}
+	try 
+		Reset(f);
+		repeat
+			ReadLn(f, strLine);
+			//WriteLn(strLine, ' pos=', i);
+			SetLength(arrLine, 0);
+			arrLine := SplitString(strLine, TAB);
+			if StrToInt(arrLine[0]) = intEventId then
+			begin
+				//WriteLn('** Only the lines that start with ', intEventId);
+				// The first part of the line is an event number.
+				strHeader := strHeader + arrLine[1] + SEP;
+				Inc(i);
+			end;
+		until Eof(f);
+		CloseFile(f);
+		
+		intFound := IsEventFound(intEventId);
+		
+		WriteLn('ADD TO arrEventFile');
+		// Remove the last pipe char.
+		strHeader := LeftStr(strHeader, Length(strHeader) - 1);
+		// Update the header record with the header and the number of header items.
+		
+		arrEventFile[intFound].Header := strHeader;
+		arrEventFile[intFound].HeaderCount := i;
+		//WriteLn('intFound=', intFound);
+		//WriteLn('strHeader=', strHeader);
+		WriteLn('Number of header items = ', i, ' (i)');
+	except
+		on E: EInOutError do
+			WriteLn('ProcessLprFile(): file ', strFileName, ' handling error occurred, Details: ', E.ClassName, '/', E.Message);
+	end;
 end;
 
 
@@ -278,15 +308,25 @@ begin
 		SetLength(arrEventFile, i + 1);
 		arrEventFile[i].EventId := intEventId;
 		arrEventFile[i].count := 0;
-		strPath := GetProgramFolder() + '\events-' + IntToStr(intEventId) + '.tsv';
+		strPath := GetProgramFolder() + '\events-' + IntToStr(intEventId) + '.psv';
 		arrEventFile[i].Path := strPath;
 		
+		AddEventHeaderFromFile(intEventId);
+		
+		{
 		if intEventId = 4625 then
-			AddEventHeader(4625, 'LprFile	LineNumber	DC	DateTime	EventId	EventStatus	Unknown1	Unknown2	Unknown3	Unknown4	SecurityId	SamAccountName	Domain	LogonFailureCode	Unknown5	SubLogonFailureCode	LogonType	LogonProcess	Protocol	WorkstationName	Unknown6	Unknown7	Unknown8	Unknown9	Unknown10	Unknown11	IpAddress	SourcePort');
+		begin
+			AddEventHeaderFromFile(4625);
+		end;
 		
 		if intEventId = 4770 then
+		begin
+			AddEventHeaderFromFile(4770);
+		end;
+		}
+		{if intEventId = 4770 then
 			AddEventHeader(4770, 'LprFile	LineNumber	DC	DateTime	EventId	EventStatus	AccountName	AccountDomain	ServiceName	ServiceId	TicketOptions	TicketEncryptionType	ClientAddress	ClientPort');
-		
+		}
 		AssignFile(arrEventFile[i].FilePointer, strPath);
 		{I+}	
 		try 
@@ -370,8 +410,8 @@ begin
 				// Get the event id for the line.
 				//strEventId := arrLine[1];
 				intEventId := StrToInt(arrLine[1]);
-				//if intEventId = 4625 then
-				//begin
+				{if intEventId = 4625 then
+				begin}
 					AddEventFile(intEventId); // Add the event to the event array when it does not exist yet.
 					//WriteLn(strFileLpr, #9, intLineCount);
 					
