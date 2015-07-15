@@ -27,8 +27,10 @@ uses
 	StrUtils,
 	UTextFile,
 	UTextSeparated,
-	USupportLibrary;
-
+	USupportLibrary,
+	ODBCConn,
+	SqlDb;				
+	
 
 
 type
@@ -48,388 +50,204 @@ type
 const
 	TAB = 				#9;
 	SEP = 				'|';
-
+	
+	TBL_E4625 = 		'event_4625';
+	FLD_E4625_ID = 		'record_id';
+	FLD_E4625_DC = 		'dc_system';
+	FLD_E4625_TG = 		'time_generated';
+	FLD_E4625_AN = 		'account_name';
+	FLD_E4625_AD = 		'account_domain';
+	FLD_E4625_IP = 		'ip_address';
+	FLD_E4625_PROC = 	'process';
+	FLD_E4625_PROT = 	'protocol';
+	FLD_E4625_LFC = 	'logon_failure_code';
+	FLD_E4625_SLFC = 	'sub_logon_failure_code';
+	FLD_E4625_LT = 		'logon_type';
+	FLD_E4625_RCD = 	'rcd';
+	FLD_E4625_RLU = 	'rlu';
+	DSN = 				'DSN_ADBEHEER_32';
+	
 
 
 var
 	//gintLineCount: integer;
 	//gtfTsv: TextFile;
 	//gstrEventId: string;
-	arrEventFile: AEventFile;
+	//arrEventFile: AEventFile;
 	//gblnAppend: boolean;
+	conn: TODBCConnection; 			// uses ODBCConn.
+	transaction: TSQLTransaction;   // uses SqlDb.
+	//query: TSQLQuery; 			// uses SqlDb.
+	gintCountEvent: integer;
 
 
 
-procedure SafeCopy(fromFile, toFile : string);
-type 
-	bufferType = array [1..65535] of char;
-	bufferTypePtr = ^bufferType;  { Use the heap }
-var 
-	bufferPtr : bufferTypePtr;     { for the buffer }
-	f1, f2 : file;
-	bufferSize, readCount, writeCount : word;
-	fmSave : byte;              { To store the filemode }
+procedure DatabaseOpen();
 begin
-	bufferSize := SizeOf(bufferType);
-	//if MaxAvail < bufferSize then exit;  { Assure there is enough memory }
-	New (bufferPtr);              { Create the buffer }
-	fmSave := FileMode;           { Store the filemode }
-	FileMode := 0;                { To read also read-only files }
-	Assign (f1, fromFile);
-	{$I-} Reset (f1, 1); {$I+}    { Note the record size 1, important! }
-	if IOResult <> 0 then exit;   { Does the file exist? }
-	Assign (f2, toFile);
-	{$I-} Reset (f2, 1); {$I+}    { Don't copy on an existing file }
-	if IOResult = 0 then begin close (f2); exit; end;
-	{$I-} Rewrite (f2, 1); {$I+}  { Open the target }
-	if IOResult <> 0 then exit;
-	repeat                        { Do the copying }
-		BlockRead (f1, bufferPtr^, bufferSize, readCount);
-		{$I-} BlockWrite (f2, bufferPtr^, readCount, writeCount); {$I+}
-		if IOResult <> 0 then begin close (f1); exit; end;
-		until (readCount = 0) or (writeCount <> readCount);
-		writeln ('Copied ', fromFile, ' to ', toFile,' ', FileSize(f2), ' bytes');
-	close (f1); close (f2);
-	FileMode := fmSave;           { Restore the original filemode }
-	Dispose (bufferPtr);          { Release the buffer from the heap }
-end;  (* safecopy *)
+	conn := TODBCCOnnection.Create(nil);
+	//query := TSQLQuery.Create(nil);
+	transaction := TSQLTransaction.Create(nil);
+	
+	WriteLn('Database open DNS: ', DSN);
+	
+	conn.DatabaseName := DSN;				 				// Data Source Name (DSN)
+	//conn.UserName:= 'ADBEHEER_USER'; 						//replace with your user name
+    //conn.Password:= 'WG5X6AHVUM2ZgQL-0O_gVmFAVcTucSzJ'; 	//replace with your password
+	conn.Transaction := transaction;
+end;
 
 
 
-function FixLine(strLine: AnsiString): AnsiString;
+procedure DatabaseClose();
+begin
+	transaction.Free;
+	conn.Free;
+end;
+
+
+function EncloseSingleQuote(const s: string): string;
 {
-	Fix the lines values
-	
-	|some|value||for|nothing
-	
-	|some|value|-|for|nothing
-	
-	Removes the double || 
+	Enclose the string s with single quotes: s > 's'.
 }
 var
-	p: integer;
-	blnFixed: boolean;
+	r: string;
 begin
-	blnFixed := false;
-	p := 0;
-
-	//WriteLn('FixLine():');
-	//WriteLn(strLine);
-	//Writeln('p=', p);
-	repeat
-		// Get a position of the || in the string.
-		p := Pos('||', strLine);
-		
-		// If you can't find them continue.
-		if p = 0 then
-			blnFixed := true
-		else
-			strLine := StringReplace(strLine, '||', '|-|', [rfReplaceAll]);
-	until blnFixed = true;
-	
-	// Finally replace all the pipe symbol for a tab.
-	// NO NEED TO CHANGE THE PIPE TO A TAB, Pipe Separated Values.
-	//strLine := StringReplace(strLine, '|', TAB, [rfReplaceAll]);
-	
-	//WriteLn('FixLine returns:');
-	//Writeln(strLine);
-	FixLine := strLine;
-end;
-	
-	
-function OccurrencesOfChar(const S: string; const C: char): integer;
-var
-	i: Integer;
-begin
-	result := 0;
-	for i := 1 to Length(S) do
-		if S[i] = C then
-			inc(result);
-end;
-
-//WriteEventLine(intEventPos, strFileLpr, intLineCount, strDcName, strLine);
-procedure WriteEventLine(intPosEvent: integer; strFileLpr: string; intLineNumber: integer; strDcName: string; strLine: AnsiString);
-var
-	strBuffer: AnsiString;
-	intHeaderCount: integer;
-	intFoundColumns: integer;
-begin
-	// Replace all pipes for a tab.
-	strBuffer := FixLine(strLine);
-	
-	// Add the prefix the DC name.
-	//strBuffer := strDcName + #9 + strBuffer;
-	// Build a new buffer with source file, line number, DC name and the original buffer.
-	strBuffer := strFileLpr + SEP + IntToStr(intLineNumber) + SEP + strDcName + SEP + strBuffer;
-	
-	//Writeln('WriteEventLine(): ', strBuffer);
-	// Get the number of columns from the header record.
-	intHeaderCount := arrEventFile[intPosEvent].HeaderCount;
-	
-	// Determine the number of columns in the line buffer. Add one of columns
-	// Finding 4 separators means 5 colums with information: c1|c2|c3|c4|c5
-	intFoundColumns := OccurrencesOfChar(strBuffer, SEP) + 1; 
-	
-	if intHeaderCount = intFoundColumns then
-	begin
-		WriteLn(arrEventFile[intPosEvent].FilePointer, strBuffer);
-		//Inc(gintLineCount);
-		Inc(arrEventFile[intPosEvent].count);
-		//Write('--Line: ', gintLineCount);
-	end;
-	{else
-		WriteLn('*** BAD LINE DETECTED: ', strBuffer);}
-end;
-
-
-
-function IsEventFound(intEventId: integer): integer;
-var
-	i: integer;
-	m: integer;
-	r: integer;
-begin
-	r := -1;
-	
-	// Get the number of items in the array.
-	m := Length(arrEventFile);
-	//WriteLn('IsEventFound(): m=', m);
-	if m = 0 then
-	begin
-		// array does not contain items.
-		//WriteLn('The array is empty!');
-		r := -1;
-	end
+	if s[1] <> '''' then
+		r := '''' + s
 	else
-	begin
-		for i := 0 to m do
-		begin
-			//WriteLn('IsEventFound():', i, #9, arrEventFile[i].EventId, #9, arrEventFile[i].Path);
-			if arrEventFile[i].EventId = intEventId then
-			begin
-				//WriteLn('FOUND IT ON POS ', i);
-				r := i;
-			end;
-		end;
-	end;
-	IsEventFound := r;
-end;
+		r := s;
+		
+	if r[Length(r)] <> '''' then
+		r := r + '''';
+
+	EncloseSingleQuote := r;
+end; // of function EncloseSingleQuote
 
 
 
-procedure AddEventHeader(intEventId: integer; strHeader: AnsiString);
+//procedure AddRecord(const strDcName: string; const strTimeGenerated: string; const strAccountName: string; const strAccountDomain: string; const strIp: string);
+procedure AddRecord(const strDcName: string; strLine: AnsiString);
 var
-	intFound: integer;
-	arrHeader: TStringArray;
-	i: integer;
+	arrLine: TStringArray;
+	q: AnsiString;			// Query String, length needs to be longer then string 
+	//i: integer;
 begin
-	intFound := IsEventFound(intEventId);
-	WriteLn('AddEventHeader(): ', intEventId, '-', strHeader);
+
+	SetLength(arrLine, 0);
+	arrLine := SplitString(strLine, '|');
+	{
+	for i := 0 to High(arrLine) do
+	begin 
+		WriteLn(#9, i, ':', #9, arrLine[i]);
+	end; // of for
+	}
+	//	0: Time Generated
+	//	8:	Account Name
+	//	9: 	Account Domain
+	//	22:	IP Address
+
+	q := 'INSERT INTO ' + TBL_E4625 + ' ';
+	q := q + 'SET ';
+	q := q + FLD_E4625_TG + '=' + EncloseSingleQuote(arrLine[0]) + ',';		// Time Generated
+	q := q + FLD_E4625_DC + '=' + EncloseSingleQuote(strDcName) + ',';		// DC Server
+	q := q + FLD_E4625_AN + '=' + EncloseSingleQuote(arrLine[8]) + ',';		// Account Name
+	q := q + FLD_E4625_AD + '=' + EncloseSingleQuote(arrLine[9]) + ',';		// Account Domain
+	q := q + FLD_E4625_LFC + '=' + EncloseSingleQuote(arrLine[10]) + ',';	// Logon Failure Code
+	q := q + FLD_E4625_SLFC + '=' + EncloseSingleQuote(arrLine[12]) + ',';	// Sub Logon Failure Code
+	q := q + FLD_E4625_PROC + '=' + EncloseSingleQuote(arrLine[14]) + ',';	// Process
+	q := q + FLD_E4625_PROT + '=' + EncloseSingleQuote(arrLine[15]) + ',';	// Protolcol
+	q := q + FLD_E4625_LT + '=' + EncloseSingleQuote(arrLine[13]) + ',';	// Logon Type
+	q := q + FLD_E4625_IP + '=' + EncloseSingleQuote(arrLine[22]) + ';';	// IP Address
 	
-	SetLength(arrHeader, 0);
-	arrHeader := SplitString(strHeader, #9);
-	WriteLn('AddEventHeader(): number of columns=', Length(arrHeader));
-	for i := 0 to High(arrHeader) do
-	begin
-		WriteLn(intEventId, ': ', i, ' = ', arrHeader[i]);
+	//WriteLn(q);
+	
+	//try
+		conn.ExecuteDirect(q);
+		transaction.Commit;
+	{except
+		WriteLn;
+		WriteLn('Error running query:');
+		WriteLn;
+		WriteLn(q);
+		WriteLn;
 	end;
-	
-	arrEventFile[intFound].Header := strHeader;
+	}
 end;
 
 
-procedure AddEventHeaderFromFile(intEventId: integer);
+
+function GetEventIdFromLine(const strLine: string): integer;
+begin
+	//          1         2
+	// 123456789012345678901234567890
+	// 2015-07-07 04:12:00|4769|8|NS00DT0261
+	GetEventIdFromLine := StrToInt(Copy(strLine, 21, 4)); // Get the Event from the line
+end; // of function GetEventIdFromLine
+
+
+procedure ExtractEventsFromFile(const intEventId: integer; const strPath: string);
 var
 	f: TextFile;
-	strFileName: string;
-	strLine: string;
-	arrLine: TStringArray;
-	i: integer;
-	strHeader: AnsiString;
-	intFound: integer;
-begin
-	WriteLn('AddEventHeaderFromFile(): ', intEventId);
-	strFileName := 'eebi-header.conf';
-	i := 0;
-	strHeader := '';
-	
-	AssignFile(f, strFileName);
-	{I+}
-	try 
-		Reset(f);
-		repeat
-			ReadLn(f, strLine);
-			//WriteLn(strLine, ' pos=', i);
-			SetLength(arrLine, 0);
-			arrLine := SplitString(strLine, TAB);
-			if StrToInt(arrLine[0]) = intEventId then
-			begin
-				//WriteLn('** Only the lines that start with ', intEventId);
-				// The first part of the line is an event number.
-				strHeader := strHeader + arrLine[1] + SEP;
-				Inc(i);
-			end;
-		until Eof(f);
-		CloseFile(f);
-		
-		intFound := IsEventFound(intEventId);
-		
-		WriteLn('ADD TO arrEventFile');
-		// Remove the last pipe char.
-		strHeader := LeftStr(strHeader, Length(strHeader) - 1);
-		// Update the header record with the header and the number of header items.
-		
-		arrEventFile[intFound].Header := strHeader;
-		arrEventFile[intFound].HeaderCount := i;
-		//WriteLn('intFound=', intFound);
-		//WriteLn('strHeader=', strHeader);
-		WriteLn('Number of header items = ', i, ' (i)');
-	except
-		on E: EInOutError do
-			WriteLn('ProcessLprFile(): file ', strFileName, ' handling error occurred, Details: ', E.ClassName, '/', E.Message);
-	end;
-end;
-
-
-
-procedure AddEventFile(intEventId: integer);
-var
-	i: integer;
-	strPath: string;
-begin
-	if IsEventFound(intEventId) = -1 then
-	begin
-		WriteLn('Found a new event id: ', intEventId);
-		
-		//WriteLn('LENGTH arrEventFile=', Length(arrEventFile)); // Init: 0
-		//WriteLn('  HIGH arrEventFile=', High(arrEventFile));   // Init: -1
-		
-		i := Length(arrEventFile);
-		SetLength(arrEventFile, i + 1);
-		arrEventFile[i].EventId := intEventId;
-		arrEventFile[i].count := 0;
-		strPath := GetProgramFolder() + '\events-' + IntToStr(intEventId) + '.psv';
-		arrEventFile[i].Path := strPath;
-		
-		AddEventHeaderFromFile(intEventId);
-		
-		{
-		if intEventId = 4625 then
-		begin
-			AddEventHeaderFromFile(4625);
-		end;
-		
-		if intEventId = 4770 then
-		begin
-			AddEventHeaderFromFile(4770);
-		end;
-		}
-		{if intEventId = 4770 then
-			AddEventHeader(4770, 'LprFile	LineNumber	DC	DateTime	EventId	EventStatus	AccountName	AccountDomain	ServiceName	ServiceId	TicketOptions	TicketEncryptionType	ClientAddress	ClientPort');
-		}
-		AssignFile(arrEventFile[i].FilePointer, strPath);
-		{I+}	
-		try 
-			if FileExists(strPath) = true then
-			begin
-				// Append to existing file.
-				Append(arrEventFile[i].FilePointer);
-			end
-			else
-			begin
-				// Create a new file.
-				WriteLn('New output file ', strPath, ' is created');
-				ReWrite(arrEventFile[i].FilePointer);
-				// Write the header, only when there is a header line in the Event record.
-				//WriteLn('len header=', Length(arrEventFile[i].Header));
-				if Length(arrEventFile[i].Header) > 0 then
-				begin
-					// When there is a header found, write it to the file.
-					WriteLn('Write a header line to event file: ', strPath);
-					WriteLn(arrEventFile[i].FilePointer, arrEventFile[i].Header);
-				end;
-			end;
-		except
-			on E: EInOutError do
-				WriteLn('ProcessLprFile(): file ', strPath, ' handling error occurred, Details: ', E.ClassName, '/', E.Message);
-		end;
-	end;
-end;
-
-
-
-
-procedure ProcessLprFile(strPathLpr: string);
-var
-	arrPath: TStringArray;
-	arrLine: TStringArray;
+	intLineCount: integer;
 	strLine: AnsiString;
 	strDcName: string;
-	//strEventId: string;
-	intEventId: integer;
-	//strPathTsv: string;
-	intLineCount: integer;
-	f: TextFile;
-	intEventPos: integer;
-	strFileLpr: string;
+	arrPath: TStringArray;
+	//s: string;
+	//x: integer;
+	//intWhatEvent: integer;
 begin
-	WriteLn('ProcessLprFile():');
-	WriteLn('  strPathLpr: ', strPathLpr);
+	WriteLn;
+	WriteLn('ExtractEventsFromFile(): ', strPath);
+	//WriteLn(intEventId, '  ', strPath);
 	
-	SetLength(arrPath, 0);
-	arrPath := SplitString(strPathLpr, '\');
-	strDcName := arrPath[Length(arrPath) - 2];
-	WriteLn('   strDcName: ', strDcName);
-	
-	strFileLpr := ExtractFileName(strPathLpr);
-	strFileLpr := StringReplace(strFileLpr, '.lpr', '', [rfReplaceAll, rfIgnoreCase]);
-	
-	
-	//strEventId := '4625';
-	
-	//strPathTsv := GetProgramFolder() + '\events-' + strEventId + '.tsv';
-	//WriteLn('  strPathTsv: ', strPathTsv);
-	
-	//AssignFile(gtfTsv, strPathTsv);
-	//ReWrite(gtfTsv); // Open file to write, create when needed.
-		
 	intLineCount := 0;
-	AssignFile(f, strPathLpr);
+	
+	AssignFile(f, strPath);
 	{I+}
 	try 
 		Reset(f);
 		repeat
 			Inc(intLineCount);
 			ReadLn(f, strLine);
-			//WriteLn(strLine);
-			if intLineCount <> 1 then
+			//WriteLn(intLineCount, ': ', strLine);
+			if intLineCount > 1 then
 			begin
-				// Skip the header line!
-				SetLength(arrLine, 0);
-				arrLine := SplitString(strLine, '|');
-				// Get the event id for the line.
-				//strEventId := arrLine[1];
-				intEventId := StrToInt(arrLine[1]);
-				{if intEventId = 4625 then
-				begin}
-					AddEventFile(intEventId); // Add the event to the event array when it does not exist yet.
-					//WriteLn(strFileLpr, #9, intLineCount);
+				// Skip the header.
+				//123456789012345678901
+				//2015-07-09 12:23:40|4624|
+				//WriteLn(intLineCount:10,': ', strLine);
+				
+				//WriteLn(intWhatEvent);
+				//if Pos('|' + IntToStr(intEventId) + '|', strLine) > 0 then
+				if GetEventIdFromLine(strLine) = intEventId then
+				begin
+					// Get the DC name from the path.
+					SetLength(arrPath, 0);
+					arrPath := SplitString(strPath, '\');
+					// Get the last folder name from th epath, that contains the DC name.
+					strDcName := arrPath[High(arrPath) - 1];
+					{
+					for x := 0 to High(arrPath) do
+					begin
+						WriteLn(x, ':', arrPath[x]);
+					end;
+					}
+					//WriteLn('DC NAME=', strDcName);
 					
-					intEventPos := IsEventFound(intEventId);
-					//WriteLn('--' + strPathLpr);
-					WriteEventLine(intEventPos, strFileLpr, intLineCount, strDcName, strLine);
-				//end;
-				SetLength(arrLine, 0);
+					AddRecord(strDcName, strLine);
+					Write('.'); // Write a point to the screen for action still working
+					Inc(gintCountEvent);
+					
+				end;
 			end;
 		until Eof(f);
 		CloseFile(f);
 	except
 		on E: EInOutError do
-			WriteLn('ProcessLprFile(): file ', strPathLpr, ' handling error occurred, Details: ', E.ClassName, '/', E.Message);
-	end;	//ProcessLprFile(strDcName, strPathLpr, strPathTsv, gstrEventId);
+			WriteLn('ProcessLprFile(): file ', strPath, ' handling error occurred, Details: ', E.ClassName, '/', E.Message);
+	end;	
 		
-	//CloseFile(gtfTsv);
-end; // 
+end; // of procedure ExtractEventsFromFile
 
 
 
@@ -442,7 +260,6 @@ var
 	strFolderChild: string;
 	strPathFoundFile: string;
 begin
-	
 	//strPath := ExtractFilePath(strFolderStart); {keep track of the path ie: c:\folder\}
 	strFileSpec := strFolderStart + '\*.*'; {keep track of the name or filter}
 	WriteLn('FindFilesRecur(): ', strFolderStart);
@@ -456,7 +273,7 @@ begin
 		begin
 			if sr.Attr = faDirectory then
 			begin
-				WriteLn('Dir:    ', sr.Name);
+				//WriteLn('Dir:    ', sr.Name);
 				strFolderChild := strFolderStart + '\' + sr.Name;
 				//WriteLn('strFolderChild=', strFolderChild);
 				FindFilesRecur(strFolderChild);
@@ -465,49 +282,14 @@ begin
 			begin
 				strPathFoundFile := strFolderStart + '\' + sr.Name;
 				//WriteLn('strPathFoundFile:   ', strPathFoundFile);
-				ProcessLprFile(strPathFoundFile);
+				//ProcessLprFile(strPathFoundFile);
+				ExtractEventsFromFile(4625, strPathFoundFile);
 			end;
 		end;
 		intValid := FindNext(sr);
 	end; // of while.
 end;
 
-
-
-procedure ShowEventFile(strWhen: string);
-var	
-	i: integer;
-	m: integer;
-begin
-	WriteLn('-----------------------------------');
-	WriteLn('EVENTFILERECORDS: ', strWhen);
-	
-	m := High(arrEventFile);
-	//WriteLn('items in array: ', m + 1);
-	
-	if m < 0 then
-		WriteLn('No items in array arrEventFile!')
-	else
-	begin
-		for i := 0 to m do
-		begin
-			WriteLn(i, ':', #9, arrEventFile[i].EventId, #9, arrEventFile[i].Path, #9, arrEventFile[i].count);
-		end;
-	end;
-end;
-
-
-
-procedure CloseAllFiles();
-var
-	i: integer;
-begin
-	for i := 0 to High(arrEventFile) do
-	begin
-		WriteLn('Closing file: ', arrEventFile[i].Path);
-		CloseFile(arrEventFile[i].FilePointer);
-	end;
-end;
 
 
 procedure ProgUsage();
@@ -527,16 +309,20 @@ end;
 procedure ProgInit();
 begin
 	//gblnAppend := false;
+	gintCountEvent := 0;
+	DatabaseOpen();
 end;
 
 
 
 procedure ProgRun();
 begin
-	if ParamCount <> 1 then
-		ProgUsage()
-	else
-		ProcessLprFile(ParamStr(1));
+	//FindFilesRecur('R:\GitRepos\NS-000144-extract-events-by-id\TEST-TREE');
+	FindFilesRecur('\\vm70as006.rec.nsint\000134-LPR\2015-07-14');
+	//if ParamCount <> 1 then
+	//	ProgUsage()
+	//else
+	//	ProcessLprFile(ParamStr(1));
 end;
 
 
@@ -548,8 +334,12 @@ begin
 	//
 	//ProcessLprFile('R:\GitRepos\NS-000144-extract-events-by-id\ebc9619f390ca2f4.lpr');
 	
-	WriteLn(FixLine('2015-07-05 14:54:17|4932|8|CN=NTDS Settings,CN=NS00DC012,CN=Servers,CN=Lelystad-01,CN=Sites,CN=Configuration,DC=fr,DC=ns,DC=nl|CN=NTDS Settings,CN=NS00DC055,CN=Servers,CN=Lelystad-01,CN=Sites,CN=Configuration,DC=fr,DC=ns,DC=nl|CN=Configuration,DC=fr,DC=ns,DC=nl|85|2070012|12111826'));
+	//WriteLn(FixLine('2015-07-05 14:54:17|4932|8|CN=NTDS Settings,CN=NS00DC012,CN=Servers,CN=Lelystad-01,CN=Sites,CN=Configuration,DC=fr,DC=ns,DC=nl|CN=NTDS Settings,CN=NS00DC055,CN=Servers,CN=Lelystad-01,CN=Sites,CN=Configuration,DC=fr,DC=ns,DC=nl|CN=Configuration,DC=fr,DC=ns,DC=nl|85|2070012|12111826'));
 
+	
+	//FindFilesRecur('\\vm70as006.rec.nsint\000134-LPR\2015-07-10');
+	//ProcessLprFile('R:\GitRepos\NS-000144-extract-events-by-id\TEST-ONE\test.lpr');
+	//ExtractEventsFromFile(4625, 'R:\GitRepos\NS-000144-extract-events-by-id\TEST-ONE\test.lpr');
 	
 //	ShowEventFile('After!');
 {	
@@ -583,10 +373,10 @@ end;
 
 procedure ProgDone();
 begin
+	DatabaseClose();
 end;
 
 
-	
 	
 begin
 	//gintLineCount := 0;
@@ -596,5 +386,5 @@ begin
 	ProgRun();
 	ProgDone();
 	
-	//WriteLn('Found ', gintLineCount, ' events with id ', strEventId);
+	WriteLn('Processed ', gintCountEvent, ' event(s).');
 end. 
