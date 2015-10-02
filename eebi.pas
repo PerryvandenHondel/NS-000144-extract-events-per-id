@@ -66,7 +66,7 @@ const
 	FLD_E4625_LT = 		'logon_type';
 	FLD_E4625_RCD = 	'rcd';
 	FLD_E4625_RLU = 	'rlu';
-	DSN = 				'DSN_ADBEHEER_32';
+	DSN = 				'DSN_EVENTS_32';
 
 	
 
@@ -92,8 +92,8 @@ begin
 	WriteLn('Database open DNS: ', DSN);
 	
 	conn.DatabaseName := DSN;				 				// Data Source Name (DSN)
-	//conn.UserName:= 'ADBEHEER_USER'; 						//replace with your user name
-    //conn.Password:= 'WG5X6AHVUM2ZgQL-0O_gVmFAVcTucSzJ'; 	//replace with your password
+	//conn.UserName:= 'ADBEHEER_USER'; 						// replace with your user name
+    //conn.Password:= 'WG5X6AHVUM2ZgQL-0O_gVmFAVcTucSzJ'; 	// replace with your password
 	conn.Transaction := transaction;
 end;
 
@@ -179,9 +179,9 @@ begin
 	arrLine := SplitString(strLine, '|');
 	
 	if gblnDebug = true then
-		WriteLn(intLineCount, ': ', strLine)
-	else
-		Write('.'); // Write a point to the screen for action still working
+		WriteLn(intLineCount, ': ', strLine);
+	//else
+		//Write('.'); // Write a point to the screen for action still working
 	
 					
 	
@@ -240,10 +240,11 @@ begin
 	arrLine := SplitString(strLine, '|');
 	
 	if gblnDebug = true then
-		WriteLn(intLineCount, ': ', strLine)
-	else
-		Write('.'); // Write a point to the screen for action still working
+		WriteLn(intLineCount, ': ', strLine);
 	
+	{else
+		Write('.'); // Write a point to the screen for action still working
+	}
 					
 	
 	if gblnDebug = true then
@@ -292,6 +293,66 @@ begin
 end;
 
 
+procedure AddRecord4724(const intLineCount: integer; const strLprName: string; const strDcName: string; strLine: AnsiString);
+const
+	TBL_E4724 = 				'event_4724';
+	FLD_E4724_LPR = 			'lpr_name';
+	FLD_E4724_DC = 				'dc_system';
+	FLD_E4724_TG = 				'time_generated'; 			// 0
+	FLD_E4724_TAN = 			'target_account_name'; 		// 3
+	FLD_E4724_TAD = 			'target_account_domain';	// 4
+	FLD_E4724_PAN = 			'priv_account_name';		// 7
+	FLD_E4724_PAD = 			'priv_account_domain';		// 8
+	FLD_E4724_LID = 			'logon_id';					// 9
+var
+	arrLine: TStringArray;
+	q: AnsiString;			// Query String, length needs to be longer then string 
+	i: integer;
+begin
+	SetLength(arrLine, 0);
+	arrLine := SplitString(strLine, '|');
+	
+	if gblnDebug = true then
+		WriteLn(intLineCount, ': ', strLine)';
+	{else
+		Write('.'); // Write a point to the screen for action still working
+	}
+					
+	
+	if gblnDebug = true then
+	begin
+		for i := 0 to High(arrLine) do
+		begin 
+			WriteLn(#9, i, ':', #9, arrLine[i]);
+		end; // of for
+	end;
+	
+	//	0: Time Generated
+	//	8:	Account Name
+	//	9: 	Account Domain
+	//	22:	IP Address
+
+	q := 'INSERT INTO ' + TBL_E4724 + ' ';
+	q := q + 'SET ';
+	q := q + FLD_E4724_LPR + '=' + FixStr(strLprName) + ',';	// Source LPR file (16 chars long)
+	q := q + FLD_E4724_DC + '=' + FixStr(strDcName) + ',';		// Source DC Server
+	q := q + FLD_E4724_TG + '=' + FixStr(arrLine[0]) + ',';		// Time Generated
+	q := q + FLD_E4724_TAN + '=' + FixStr(arrLine[3]) + ',';	// Account Name
+	q := q + FLD_E4724_TAD + '=' + FixStr(arrLine[4]) + ',';	// Account Domain
+	q := q + FLD_E4724_PAN + '=' + FixStr(arrLine[7]) + ',';	// Logon Type
+	q := q + FLD_E4724_PAD + '=' + FixStr(arrLine[8]) + ',';	// Process
+	q := q + FLD_E4724_LID + '=' + FixStr(arrLine[9]) + ';';	// Protocol
+	
+	if gblnDebug = true then
+		WriteLn(q);
+	
+	conn.ExecuteDirect(q);
+	transaction.Commit;
+	
+	Inc(gintCountEvent);
+end; // of procedure AddRecord4724.
+
+
 
 function GetEventIdFromLine(const strLine: string): integer;
 begin
@@ -316,7 +377,6 @@ var
 	//x: integer;
 	//intWhatEvent: integer;
 begin
-	WriteLn;
 	WriteLn('ExtractEventsFromFile(): ', strPath);
 	//WriteLn(intEventId, '  ', strPath);
 	
@@ -345,12 +405,11 @@ begin
 				// Get the current event id in the line.
 				intEventFoundInLine := GetEventIdFromLine(strLine);
 				
-				if intEventFoundInLine = 4624 then
-					AddRecord4624(intLineCount, strLprName, strDcName, strLine);
-				{
-				if intEventFoundInLine = 4625 then
-					AddRecord4625(intLineCount, strLprName, strDcName, strLine);
-				}	
+				case intEventFoundInLine of
+					4624: AddRecord4624(intLineCount, strLprName, strDcName, strLine);
+					4625: AddRecord4625(intLineCount, strLprName, strDcName, strLine);
+					4724: AddRecord4724(intLineCount, strLprName, strDcName, strLine);
+				end; // of case.
 					
 			end;
 		until Eof(f);
@@ -431,7 +490,7 @@ end;
 
 procedure ProgRun();
 begin
-	FindFilesRecur('\\vm70as006.rec.nsint\000134-LPR\2015-07-14');
+	FindFilesRecur('\\vm70as006.rec.nsint\000134-LPR\2015-07-17');
 	
 	
 	//if ParamCount <> 1 then
@@ -444,7 +503,7 @@ end;
 
 procedure ProgTest();
 begin
-	ExtractEventsFromFile('\\vm70as006.rec.nsint\000134-LPR\2015-07-14\NS00DC017\06f2461c05ac9001.lpr');
+	ExtractEventsFromFile('\\vm70as006.rec.nsint\000134-LPR\2015-07-15\NS00DC011\179cfac1a19dc16f.lpr');
 
 	//UpDir('D:\temp\');
 	//RecurDir('D:\Temp\');
