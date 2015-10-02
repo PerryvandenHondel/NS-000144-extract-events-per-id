@@ -1,22 +1,16 @@
-{
-	
-	Extract Events by ID from LPR export files. (EEBI)
-
-							
-	R:\GitRepos\NS-000144-extract-events-by-id\NS00DC012\08db66346664a0b5.lpr					
-
-	
-}
-
+//
+//	Extract Events by ID from LPR export files. (EEBI)
+//
+//	R:\GitRepos\NS-000144-extract-events-by-id\NS00DC012\08db66346664a0b5.lpr					
+//
+//
 
 
 program ExtracEventsById;
 
 
-
 {$MODE OBJFPC} // Do not forget this ever
 {$M+}
-
 
 
 uses
@@ -28,7 +22,6 @@ uses
 	UTextFile,
 	UTextSeparated,
 	USupportLibrary;
-
 
 
 type
@@ -44,11 +37,10 @@ type
 	AEventFile = array of REventFile;
 
 
-
 const
 	TAB = 				#9;
 	SEP = 				'|';
-
+	STEP_MOD = 			127;
 
 
 var
@@ -56,8 +48,8 @@ var
 	//gtfTsv: TextFile;
 	//gstrEventId: string;
 	arrEventFile: AEventFile;
+	csv: CTextFile;
 	//gblnAppend: boolean;
-
 
 
 procedure SafeCopy(fromFile, toFile : string);
@@ -95,17 +87,15 @@ begin
 end;  (* safecopy *)
 
 
-
 function FixLine(strLine: AnsiString): AnsiString;
-{
-	Fix the lines values
-	
-	|some|value||for|nothing
-	
-	|some|value|-|for|nothing
-	
-	Removes the double || 
-}
+//
+//	Fix the lines values
+//	
+//	From:	|some|value||for|nothing
+//	To:		|some|value|-|for|nothing
+//	
+//	Removes the double || and replaces it with |-| 
+//
 var
 	p: integer;
 	blnFixed: boolean;
@@ -124,6 +114,7 @@ begin
 		if p = 0 then
 			blnFixed := true
 		else
+			// Replaces the double pipe (||) to pipe-dash-pipe (|-|)
 			strLine := StringReplace(strLine, '||', '|-|', [rfReplaceAll]);
 	until blnFixed = true;
 	
@@ -357,8 +348,87 @@ begin
 end;
 
 
+function ExtractUniqueIdFromPath(p: string): string;
+//
+//	Returns the Unique DI from the path (last 8 chars of the file name)
+//
+//	p = \\10.4.222.20\TESTLPR\2015-10-02\NS00DC011\NS00DC011-Sec-20151002064535-h5e0AycC.lpr 
+//
+//	Returns: h5e0AycC
+//
+var
+	//x: integer;
+	a: TStringArray;
+begin
+	SetLength(a, 0);
+	a := SplitString(p, '-');
+	//for x := 0 to high(a) do
+	//begin
+	//	WriteLn(x:2, ': ', a[x]);
+	//end; // of for
+	ExtractUniqueIdFromPath := LeftStr(a[5], Length(a[5]) - 4);
+	SetLength(a, 0);
+end; // of function ExtractUniqueIdFromPath
 
 
+procedure ProcessLine(const e: integer; uid: string; lineNumber: integer; l: AnsiString);
+//
+//	Write a line to the output file
+//
+//	e:				Event ID
+//	uid:			Unique ID of the source file.
+//	lineNumber:		The line number in the source file.
+//	l:				String containing the log line data
+//
+begin
+	//WriteLn('ProcessLine():');
+	l := FixLine(l);
+	csv.WriteToFile(uid + '|' + IntToStr(lineNumber) + '|' + l);
+end; // of procedure ProcessLine
+
+
+procedure ProcessLprFile(const e: integer; const p: string);
+var
+	lpr: CTextFile;
+	strLine: AnsiString;
+	intCurrentLine: integer;
+	uid: string;
+begin
+	WriteLn('Extracting all ', e, ' events from file: ', p, ', please wait...');
+	csv := CTextFile.Create(IntToStr(e) + '.csv');
+	csv.OpenFileWrite();
+	
+	//2015-10-02 06:45:36|Security|NS00DC011.prod.ns.nl|4776|8|MICROSOFT_AUTHENTICATION_PACKAGE_V1_0|SVC_SP10_Setup|VM00AS1529|0x0
+	csv.WriteToFile('UID|LineNumber|DateTime|EventLog|Fqdn|EventId|EventType|AuthenticationPackage|Account|Host|LogonFailureCode');
+	
+	uid := ExtractUniqueIdFromPath(p);
+
+	lpr := CTextFile.Create(p);
+	lpr.OpenFileRead();
+	repeat
+		strLine := lpr.ReadFromFile();
+		intCurrentLine := lpr.GetCurrentLine();
+		//WriteLn(intCurrentLine:6, ': ', strLine);
+		
+		if Pos('|'  + IntToStr(e) + '|', strLine) > 0 then
+		begin
+			// The Event ID is found in the line
+			//WriteLn('>>> Event ID: ', e, ' is found in the line');
+			ProcessLine(e, uid, intCurrentLine, strLine);
+			WriteMod(intCurrentLine, STEP_MOD, 'lines')
+		end;
+	until lpr.GetEof();
+	
+	lpr.CloseFile();
+	
+	WriteLn('Input file contained ', intCurrentLine, ' lines.');
+	
+	
+	csv.CloseFile();
+end; // of procedure ProcessLprFile
+
+
+{
 procedure ProcessLprFile(strPathLpr: string);
 var
 	arrPath: TStringArray;
@@ -395,7 +465,6 @@ begin
 		
 	intLineCount := 0;
 	AssignFile(f, strPathLpr);
-	{I+}
 	try 
 		Reset(f);
 		repeat
@@ -410,8 +479,8 @@ begin
 				// Get the event id for the line.
 				//strEventId := arrLine[1];
 				intEventId := StrToInt(arrLine[1]);
-				{if intEventId = 4625 then
-				begin}
+				//if intEventId = 4625 then
+				//begin
 					AddEventFile(intEventId); // Add the event to the event array when it does not exist yet.
 					//WriteLn(strFileLpr, #9, intLineCount);
 					
@@ -430,9 +499,9 @@ begin
 		
 	//CloseFile(gtfTsv);
 end; // 
+}
 
-
-
+{
 procedure FindFilesRecur(strFolderStart: string);
 var
 	sr: TSearchRec;
@@ -443,11 +512,11 @@ var
 	strPathFoundFile: string;
 begin
 	
-	//strPath := ExtractFilePath(strFolderStart); {keep track of the path ie: c:\folder\}
-	strFileSpec := strFolderStart + '\*.*'; {keep track of the name or filter}
+	//strPath := ExtractFilePath(strFolderStart); //keep track of the path ie: c:\folder\
+	strFileSpec := strFolderStart + '\*.*'; //keep track of the name or filter
 	WriteLn('FindFilesRecur(): ', strFolderStart);
 	
-	intValid := FindFirst(strFileSpec, faAnyFile, sr); { Find first file}
+	intValid := FindFirst(strFileSpec, faAnyFile, sr); //Find first file
 	//Writeln(intValid);
 	
 	while intValid = 0 do 
@@ -471,7 +540,7 @@ begin
 		intValid := FindNext(sr);
 	end; // of while.
 end;
-
+}
 
 
 procedure ShowEventFile(strWhen: string);
@@ -523,12 +592,10 @@ begin
 end;
 
 
-
 procedure ProgInit();
 begin
 	//gblnAppend := false;
-end;
-
+end; // of procedure ProgInit
 
 
 procedure ProgRun();
@@ -536,65 +603,32 @@ begin
 	if ParamCount <> 1 then
 		ProgUsage()
 	else
-		ProcessLprFile(ParamStr(1));
-end;
-
+		ProcessLprFile(4776, ParamStr(1));
+end; // of procedure ProgRun
 
 
 procedure ProgTest();
+var	
+	p: string;
+	e: integer;
 begin
-	//UpDir('D:\temp\');
-	//RecurDir('D:\Temp\');
-	//
-	//ProcessLprFile('R:\GitRepos\NS-000144-extract-events-by-id\ebc9619f390ca2f4.lpr');
+	e := 4776; // Event ID.
 	
-	WriteLn(FixLine('2015-07-05 14:54:17|4932|8|CN=NTDS Settings,CN=NS00DC012,CN=Servers,CN=Lelystad-01,CN=Sites,CN=Configuration,DC=fr,DC=ns,DC=nl|CN=NTDS Settings,CN=NS00DC055,CN=Servers,CN=Lelystad-01,CN=Sites,CN=Configuration,DC=fr,DC=ns,DC=nl|CN=Configuration,DC=fr,DC=ns,DC=nl|85|2070012|12111826'));
-
-	
-//	ShowEventFile('After!');
-{	
-	//WriteLn(DoesEventIdExists('4655'));
-	//AddEventFile('4625');
-	//AddEventFile('4625');
-	//AddEventFile('4625');
-	//ShowEventFile('Before!');
-	//AddEventFile(4625);
-	AddEventFile(4720);
-	AddEventFile(5000);
-	AddEventFile(5000);
-	AddEventFile(5010);
-	AddEventFile(5000);
-	AddEventFile(4720);
-	AddEventFile(4722);
-	AddEventFile(4723);
-	AddEventFile(4724);
-	AddEventFile(4725);
-	AddEventFile(4726);
-	
-	
-	//WriteLn(IsEventFound('4625'));
-	//AddEventFile('4625');
-	//WriteLn(DoesEventIdExists('4625'));
-	
-	CloseAllFiles();
-}	
+	p := '\\10.4.222.20\TESTLPR\2015-10-02\NS00DC011\NS00DC011-Sec-20151002064535-h5e0AycC.lpr'; // Path of LPR file.
+	p := '\\10.4.222.20\TESTLPR\2015-10-02\NS00DC011\NS00DC011-Sec-20151002075035-tMrBYCL0.lpr'; // Path of LPR file.
+	//WriteLn(ExtractUniqueIdFromPath(p));
+	ProcessLprFile(e, p);
 end;
 
 
 procedure ProgDone();
 begin
-end;
-
-
+end; // of procedure ProgTest
 	
 	
 begin
-	//gintLineCount := 0;
-
 	ProgInit();
-	//ProgTest();
+	// ProgTest();
 	ProgRun();
 	ProgDone();
-	
-	//WriteLn('Found ', gintLineCount, ' events with id ', strEventId);
-end. 
+end.  // of program ExtracEventsById
