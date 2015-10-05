@@ -207,15 +207,15 @@ begin
 	
 		// Read the header string from the .conf file.
 		header := ReadSettingKey(e, 'Header');
-		WriteLn('header after ReadSettingKey length: ', Length(header));
+		//WriteLn('header after ReadSettingKey length: ', Length(header));
 		if Length(header) = 0 then
 		begin
 			WriteLn('*** Missing the header for event ', e, ' in the config file ', CONF_NAME , ' ***');
 			Exit;
 		end; // of if
 		// Write the lheader to the file
-		WriteLn('Writing header to ', e, '.csv:');
-		WriteLn(header);
+		//WriteLn('Writing header to ', e, '.csv:');
+		//WriteLn(header);
 		csv.WriteToFile(header);
 	end; // of if
 
