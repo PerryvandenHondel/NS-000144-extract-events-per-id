@@ -21,6 +21,7 @@ program ExtracEventsById;
 
 {$MODE OBJFPC} // Do not forget this ever
 {$M+}
+{$H+}
 
 
 uses
@@ -59,10 +60,10 @@ function ReadSettingKey(section: string; key: string): string;
 //	Needs updates for checking, validating data.
 //
 var
-	r: string;					// Return value of this function
+	r: Ansistring;					// Return value of this function
 	sectionName: string;
 	inSection: boolean;
-	l: string;					// Line buffer
+	l: Ansistring;					// Line buffer
 	p: string;					// Path of the config file
 	conf: CTextFile;			// Class Text File 
 begin
@@ -98,6 +99,7 @@ begin
 	until conf.GetEof();
 	conf.CloseFile();
 	ReadSettingKey := r;
+	WriteLn('ReadSettingKey(): ', r, 'LEN=', Length(r));
 end; // of function ReadSettingKey
 
 
@@ -205,17 +207,18 @@ begin
 	
 		// Read the header string from the .conf file.
 		header := ReadSettingKey(e, 'Header');
+		WriteLn('header after ReadSettingKey length: ', Length(header));
 		if Length(header) = 0 then
 		begin
 			WriteLn('*** Missing the header for event ', e, ' in the config file ', CONF_NAME , ' ***');
 			Exit;
 		end; // of if
 		// Write the lheader to the file
+		WriteLn('Writing header to ', e, '.csv:');
+		WriteLn(header);
 		csv.WriteToFile(header);
 	end; // of if
-	
-	
-	
+
 	uid := ExtractUniqueIdFromPath(p);
 
 	lpr := CTextFile.Create(p);
